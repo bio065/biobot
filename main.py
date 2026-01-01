@@ -21,7 +21,7 @@ DB_URL = os.getenv("DB_URL")
 # 1. Agar kanalingiz ochiq bo'lsa (usernamesi bor): "@KanalUsername"
 # 2. Agar yopiq bo'lsa (linkli): "-100..." bilan boshlanadigan ID raqam (Int)
 # ---------------------------------------------------------
-KANAL_ID = "@chekbotttt" 
+KANAL_ID = "-1003504661215" 
 KANAL_URL = "https://t.me/chekbotttt"
 
 if not BOT_TOKEN or not DB_URL:
