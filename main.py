@@ -9,8 +9,8 @@ from aiogram.filters import CommandStart
 logging.basicConfig(level=logging.INFO)
 
 # O'zgaruvchilarni "Environment"dan olamiz (Xavfsizlik uchun)
-BOT_TOKEN = os.getenv("8578013762:AAEX02jc0OTIFhUATJHokT5SgaAsNsEbH50")
-DB_URL = os.getenv("postgresql://postgres.mpppicqcdcgzccrqctql:-4y93@nDuZs!RK%@aws-1-eu-central-1.pooler.supabase.com:6543/postgres")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DB_URL = os.getenv("DB_URL")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
