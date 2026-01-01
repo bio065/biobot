@@ -5,65 +5,80 @@ import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 
-# Loglarni formatlash: vaqti, darajasi va xabari
+# 1. Loglarni sozlash (Xatolarni ko'rish uchun)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# O'zgaruvchilarni olish
+# 2. O'zgaruvchilarni olish
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DB_URL = os.getenv("DB_URL")
 
-# Xavfsizlik tekshiruvi
+# Token tekshiruvi
 if not BOT_TOKEN:
-    logger.error("BOT_TOKEN topilmadi! Render Environment Variables'ni tekshiring.")
-if not DB_URL:
-    logger.error("DB_URL topilmadi! Render Environment Variables'ni tekshiring.")
+    logger.critical("BOT_TOKEN topilmadi! Render Environment Variables'ni tekshiring.")
+    exit(1)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# 3. Bazaga ulanish funksiyasi
 async def create_db_pool():
+    logger.info("Bazaga ulanishga harakat qilinmoqda...")
     try:
-        # DB_URL ichida maxsus belgilar bo'lsa ham ulanishga harakat qiladi
-        pool = await asyncpg.create_pool(DB_URL, timeout=30)
-        logger.info("✅ Ma'lumotlar bazasiga muvaffaqiyatli ulanish hovuzi yaratildi.")
+        pool = await asyncpg.create_pool(
+            DB_URL,
+            min_size=1,
+            max_size=5,
+            command_timeout=60
+        )
+        logger.info("✅ Baza bilan aloqa muvaffaqiyatli o'rnatildi!")
         return pool
     except Exception as e:
-        logger.error(f"❌ Bazaga ulanishda xatolik: {type(e).__name__}: {e}")
+        logger.error(f"❌ Bazaga ulanishda xato: {e}")
         return None
 
+# 4. /start komandasi uchun handler
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, db_pool):
-    if not db_pool:
-        await message.answer("Baza bilan aloqa yo'q.")
-        return
-
     user_id = message.from_user.id
     full_name = message.from_user.full_name
 
+    # Agar baza ishlamayotgan bo'lsa
+    if not db_pool:
+        await message.answer("⚠️ Bot hozircha baza bilan bog'lana olmayapti.")
+        return
+
     try:
         async with db_pool.acquire() as connection:
+            # Userni bazaga yozish (agar avval bo'lsa, xato bermaydi)
             await connection.execute(
-                "INSERT INTO users (id, full_name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+                """
+                INSERT INTO users (id, full_name) 
+                VALUES ($1, $2) 
+                ON CONFLICT (id) DO NOTHING
+                """,
                 user_id, full_name
             )
-        await message.answer(f"Salom, {full_name}! Siz muvaffaqiyatli ro'yxatga olindingiz.")
-        logger.info(f"User {user_id} bazaga qo'shildi/bor edi.")
+        await message.answer(f"Assalomu alaykum, {full_name}! ✅\nSiz muvaffaqiyatli bazaga qo'shildingiz.")
+        logger.info(f"Yangi foydalanuvchi: {full_name} ({user_id})")
+        
     except Exception as e:
-        logger.error(f"INSERT xatosi: {e}")
-        await message.answer("Ma'lumotni saqlashda xatolik yuz berdi.")
+        logger.error(f"Ma'lumot saqlashda xato: {e}")
+        await message.answer("Texnik xatolik yuz berdi.")
 
+# 5. Asosiy ishga tushirish funksiyasi
 async def main():
-    logger.info("Bot ishga tushmoqda...")
-    
-    # Pool yaratamiz
+    # Eski webhooklarni o'chirish (Conflict xatosini yo'qotadi)
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    # Bazaga ulanish
     pool = await create_db_pool()
-    
+
+    # Agar baza ulansa, jadvalni yaratib olamiz
     if pool:
-        # Jadval borligini tekshirish/yaratish
         try:
             async with pool.acquire() as conn:
                 await conn.execute("""
@@ -73,11 +88,13 @@ async def main():
                         created_at Timestamptz DEFAULT NOW()
                     );
                 """)
-                logger.info("✅ Foydalanuvchilar jadvali tekshirildi.")
+            logger.info("✅ 'users' jadvali tekshirildi/yaratildi.")
         except Exception as e:
             logger.error(f"Jadval yaratishda xato: {e}")
+    else:
+        logger.warning("⚠️ Diqqat! Baza ulanmadi, lekin bot ishlayveradi (ma'lumot saqlamaydi).")
 
-    # Botni ishga tushirish (poolni har bir handlerga uzatamiz)
+    # Botni ishga tushiramiz va poolni handlerlarga uzatamiz
     await dp.start_polling(bot, db_pool=pool)
 
 if __name__ == "__main__":
