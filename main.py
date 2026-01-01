@@ -3,7 +3,7 @@ import asyncio
 import logging
 import asyncpg
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, CommandObject # <-- CommandObject qo'shildi
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import FSInputFile
 
@@ -16,8 +16,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 DB_URL = os.getenv("DB_URL")
 
 # !!! KANALINGIZNI YOZING !!!
-KANAL_ID = "@sizning_kanalingiz_useri"
-KANAL_URL = "https://t.me/sizning_kanalingiz_useri"
+KANAL_ID = "@chekbotttt"
+KANAL_URL = "https://t.me/chekbotttt"
 
 if not BOT_TOKEN or not DB_URL:
     logger.critical("❌ Token yoki DB_URL topilmadi!")
@@ -41,20 +41,16 @@ async def create_db_pool():
 # --- 3. REFERAL VA USER MANTIQI ---
 
 async def register_user(user_id, full_name, username, referrer_id, pool):
-    """
-    Yangi userni ro'yxatdan o'tkazish va referalni hisoblash
-    """
     if not pool: return False
 
     try:
         async with pool.acquire() as conn:
-            async with conn.transaction(): # Tranzaksiya (xavfsiz yozish)
-                
+            async with conn.transaction():
                 # 1. User avval bormi tekshiramiz
                 exists = await conn.fetchval("SELECT 1 FROM users WHERE id = $1", user_id)
                 
                 if exists:
-                    return "old_user" # User avval bo'lgan, referal hisoblanmaydi
+                    return "old_user"
 
                 # 2. Yangi userni qo'shamiz
                 await conn.execute("""
@@ -85,17 +81,18 @@ def sub_keyboard():
 
 def main_menu_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔗 Referal (Do'stlarni chaqirish)", callback_data="referral_menu")
+    kb.button(text="↗️ Do'stlarni taklif qilish", callback_data="referral_menu")
     kb.button(text="📊 Statistika", callback_data="my_stats")
     kb.adjust(1)
     return kb.as_markup()
 
 # --- 5. HANDLERLAR ---
 
+# DIQQAT: Bu yerda 'command: CommandObject' qo'shildi!
 @dp.message(CommandStart())
-async def cmd_start(message: types.Message, db_pool):
+async def cmd_start(message: types.Message, command: CommandObject, db_pool):
     user = message.from_user
-    args = message.command.args # /start 12345 (dagi 12345 ni oladi)
+    args = command.args # Endi xato bermaydi, argumentni shu yerdan oladi
     
     referrer_id = None
     if args and args.isdigit():
@@ -108,7 +105,7 @@ async def cmd_start(message: types.Message, db_pool):
         member = await bot.get_chat_member(KANAL_ID, user.id)
         is_sub = member.status in ['member', 'administrator', 'creator']
     except:
-        is_sub = False # Bot admin emas yoki kanal xato
+        is_sub = False 
 
     if not is_sub:
         await message.answer(
@@ -122,10 +119,9 @@ async def cmd_start(message: types.Message, db_pool):
 
     # 3. Natijaga qarab javob berish
     if status == "referral_success":
-        # Taklif qilgan odamga xabar yuborish
         try:
             await bot.send_message(referrer_id, f"🎉 Tabriklaymiz! Sizning havolangiz orqali <b>{user.full_name}</b> botga qo'shildi.")
-        except: pass # Agar taklif qilgan odam botni bloklagan bo'lsa
+        except: pass
 
     await message.answer(f"✅ Xush kelibsiz, <b>{user.full_name}</b>!\nMenyu tanlang:", reply_markup=main_menu_keyboard(), parse_mode="HTML")
 
@@ -141,28 +137,24 @@ async def on_check(call: types.CallbackQuery):
         else:
             await call.answer("❌ Siz hali a'zo bo'lmadingiz!", show_alert=True)
     except:
-        await call.answer("Texnik xatolik (Bot adminmi?)", show_alert=True)
+        await call.answer("Texnik xatolik", show_alert=True)
 
-# REFERAL MENYUSI (LINK VA TUGMA)
+# REFERAL MENYUSI
 @dp.callback_query(F.data == "referral_menu")
 async def show_referral(call: types.CallbackQuery, db_pool):
     user = call.from_user
     if not db_pool: return
 
-    # Botning username-ni olamiz (havola yasash uchun)
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start={user.id}"
 
-    # Bazadan nechta odam chaqirganini olamiz
     async with db_pool.acquire() as conn:
         count = await conn.fetchval("SELECT referral_count FROM users WHERE id = $1", user.id) or 0
 
-    # Share tugmasi (Telegramning maxsus funksiyasi)
     share_url = f"https://t.me/share/url?url={ref_link}&text=Ajoyib%20bot%20topdim,%20kirib%20ko'r!"
 
     kb = InlineKeyboardBuilder()
-    # Bu tugma bosilganda kontakt tanlash oynasi chiqadi
-    kb.button(text="↗️ Do'stlarni taklif qilish", url=share_url)
+    kb.button(text="↗️ Do'stlarga yuborish", url=share_url)
     kb.button(text="🔙 Orqaga", callback_data="back_home")
     kb.adjust(1)
 
@@ -174,6 +166,17 @@ async def show_referral(call: types.CallbackQuery, db_pool):
     )
     
     await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+# STATISTIKA (USER UCHUN)
+@dp.callback_query(F.data == "my_stats")
+async def my_stats(call: types.CallbackQuery, db_pool):
+    user = call.from_user
+    if not db_pool: return
+
+    async with db_pool.acquire() as conn:
+        count = await conn.fetchval("SELECT referral_count FROM users WHERE id = $1", user.id) or 0
+    
+    await call.answer(f"📊 Siz jami {count} ta odam taklif qildingiz!", show_alert=True)
 
 @dp.callback_query(F.data == "back_home")
 async def go_home(call: types.CallbackQuery):
@@ -189,7 +192,6 @@ async def cmd_stat(message: types.Message, db_pool):
     try:
         async with db_pool.acquire() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM users")
-            # Kim eng ko'p odam chaqirganini ham qo'shamiz
             top_users = await conn.fetch("SELECT full_name, referral_count FROM users ORDER BY referral_count DESC LIMIT 10")
             all_users = await conn.fetch("SELECT full_name, username, created_at, referral_count FROM users ORDER BY created_at DESC")
 
@@ -197,9 +199,9 @@ async def cmd_stat(message: types.Message, db_pool):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(f"JAMI FOYDALANUVCHILAR: {count} ta\n")
             f.write("="*30 + "\n\n")
-            f.write("TOP 10 REFERALLAR (Eng faollar):\n")
+            f.write("TOP 10 REFERALLAR:\n")
             for u in top_users:
-                f.write(f"- {u['full_name']}: {u['referral_count']} ta taklif\n")
+                f.write(f"- {u['full_name']}: {u['referral_count']} ta\n")
             f.write("\n" + "="*30 + "\n\n")
             f.write("TO'LIQ RO'YXAT:\n")
             for i, u in enumerate(all_users, 1):
@@ -207,7 +209,7 @@ async def cmd_stat(message: types.Message, db_pool):
                 uname = f"@{u['username']}" if u['username'] else "NoUser"
                 f.write(f"{i}. {name} | {uname} | Ref: {u['referral_count']}\n")
 
-        await message.answer_document(FSInputFile(file_path), caption=f"📊 <b>Jami obunachilar:</b> {count} ta")
+        await message.answer_document(FSInputFile(file_path), caption=f"📊 <b>Jami:</b> {count} ta")
         await msg.delete()
         os.remove(file_path)
 
